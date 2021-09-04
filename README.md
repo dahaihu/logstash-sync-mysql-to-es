@@ -2,10 +2,10 @@
 
 ## 单表同步
 
-使用到的表结构如下
+### 表结构
 
 ```sql
-CREATE TABLE `logstash_resource` (
+CREATE TABLE `sync_es.logstash_resource` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(100) NOT NULL COMMENT 'resource name',
   `description` varchar(100) NOT NULL COMMENT 'resource description',
@@ -17,7 +17,7 @@ CREATE TABLE `logstash_resource` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 ```
 
-logstash需要使用的配置如下
+### logstash 配置
 
 ```conf
 input {
@@ -57,6 +57,8 @@ output {
 
 ```
 
+### logstash 配置详解
+
 配置中的如下项是关于`mysql`链接相关的配置。
 
 ```
@@ -91,26 +93,22 @@ schedule => "* * * * * *"
 
 ## nested field 同步
 
-比如有一个用户对资源的角色表，需要用户按照对资源的角色进行搜索，这个时候需要使用`nested field`。如何将这个一对多的关系同步到`elasticsearch`之中呢？
+比如有一个用户对资源的角色表，需要用户按照对资源的角色进行搜索，这个时候需要使用`nested field`。
 
-新增的表结构如下
+### 新增表结构
 
 ```sql
-CREATE TABLE `logstash_resource_role` (
+CREATE TABLE `sync_es.logstash_resource_role` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
   `resource_id` int(11) NOT NULL,
-  `role_id` int(11) NOT NULL,
-  `create_time` bigint(20) NOT NULL COMMENT 'create_time',
-  `update_time` bigint(20) NOT NULL COMMENT 'update_time',
-  `delete_time` bigint(20) DEFAULT '0' COMMENT 'delete_time',
+  `role_id` int(11) NOT NULL
   PRIMARY KEY (`id`),
-  UNIQUE KEY `user_resource` (`user_id`,`resource_id`),
-  KEY `update_time` (`update_time`)
+  UNIQUE KEY `user_resource` (`user_id`,`resource_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 ```
 
-可以按照如下配置进行。`logstash_resource`表中除了有资源对应的信息，还有用户对该资源的角色信息。
+### logstash 配置
 
 ```
 input {
@@ -179,12 +177,97 @@ output {
 }
 ```
 
+`statement`执行的结果可以如下
 
+```
++----+-------+-------------+-------------+-------------+-------------+---------+---------+
+| id | name  | description | create_time | update_time | delete_time | user_id | role_id |
++----+-------+-------------+-------------+-------------+-------------+---------+---------+
+|  1 | name1 | description |  1630744743 |  1630748902 |           0 |       1 |       2 |
+|  1 | name1 | description |  1630744743 |  1630748902 |           0 |       2 |       3 |
+|  2 | name2 | description |  1630744744 |  1630748902 |           0 |       3 |       3 |
++----+-------+-------------+-------------+-------------+-------------+---------+---------+
+```
 
-## 问题
+`aggregrate`的配置解析如下:
 
-1. 这种更新有一个问题，如果`sql`使用的条件是`>`，此时的最大`update_time`假如是`1630744741`，而后续如果也有`update_time`是`1630744741`的数据插入进来，数据就不会插入到`elasticsearch`里面去；如果`sql`使用的条件是`>=`，那么下次执行的时候，数据记录中`update_time`为`1630744741`会再次同步。
+1. `push_previous_map_as_event => true`: `aggregate`插件每次碰到一个新的`id`，会把之前聚合的结果`map`作为一个`event`，存储到`elasticsearch`里面去。然后为这个新`id`创建一个`map`。
+2. `timeout =>5`: 当有`5s`没有新的`event`，则会把最后一次聚合的结果`map`，存储到`elasticsearch`之中。
+3. 原始的`event`并不会被处理，因为脚本的结尾执行了`event.cancel()`。
+
+在执行`logstash`之前，需要通过如下方式创建好`mapping`
+
+```shell
+curl -X PUT -H 'Content-Type: application/json' -d '
+{
+    "mappings": {
+         "properties" : {
+             "user_role" : {
+                 "type" : "nested",
+                 "properties" : {
+                     "user_id" : { "type" : "long" },
+                     "role_id" : { "type" : "long" }
+                 }
+             }
+         }
+    }
+}' 'http://localhost:9200/logstash_resource'
+```
+
+对于`statement`实例存储到`elasticsearch`的两条记录就如下:
+
+```json
+[
+      {
+        "_index": "logstash_resource",
+        "_type": "_doc",
+        "_id": "2",
+        "_score": 1,
+        "_source": {
+          "description": "description",
+          "update_time": 1630748902,
+          "delete_time": 0,
+          "create_time": 1630744744,
+          "user_role": [
+            {
+              "user_id": 3,
+              "role_id": 3
+            }
+          ],
+          "name": "name2",
+          "id": 2
+        }
+      },
+      {
+        "_index": "logstash_resource",
+        "_type": "_doc",
+        "_id": "1",
+        "_score": 1,
+        "_source": {
+          "description": "description",
+          "update_time": 1630748902,
+          "delete_time": 0,
+          "create_time": 1630744743,
+          "user_role": [
+            {
+              "user_id": 2,
+              "role_id": 3
+            }
+          ],
+          "name": "name1",
+          "id": 1
+        }
+      }
+]
+```
+
+## logstash同步的问题
+
+1. 如果`sql`使用的条件是`>`，假如此时的最大`update_time`是`1630744741`，而后续如果也有`update_time`是`1630744741`的数据插入进来，数据就不会插入到`elasticsearch`里面去；如果`sql`使用的条件是`>=`，那么下次执行的时候，数据记录中`update_time`为`1630744741`会再次同步。(这个`update_time`是一个`s`级的时间戳，要在一定程度上缓解这个问题可以使用`ms`级的时间戳)
 2. nested field数据更新，需要由`logstash_resource_role`表反映到`logstash_resource`里面去，因为需要由`update_time`才会触发对资源的数据以及角色的数据进行更新。
+3. 本文所有代码都在项目[logstash-sync-mysql-to-es](https://github.com/dahaihu/logstash-sync-mysql-to-es)，觉得有用的同学可以给本文点赞呀，还可以`star`下项目。()
+
+### 参考文献
 
 [1] https://www.elastic.co/guide/en/logstash/current/plugins-inputs-jdbc.html#plugins-inputs-jdbc-record_last_run
 
