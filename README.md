@@ -69,12 +69,13 @@ output {
  jdbc_password => "123456"
 ```
 
-配置中的如下项是表示使用`update_time`来记录上一次的更新时间，内容存储在`last_run_metadata_path`里面。在每次调度的时候，会把上次记录的值替换为`statement`之中的`:sql_last_value`。
+配置中的如下项是表示使用`update_time`来记录上一次的更新时间，内容存储在`last_run_metadata_path
+`里面。在每次调度的时候，会把`statement`之中的`:sql_last_value`替换为上次记录的值。调度完成之后，则会把此次运行的最大`update_time`更新到`last_run_metadata_path`之中以便下次调用; `tracking_column_type`在此场景下是`numeric`表示数值类型，另外还支持的类型是`datetime`。
 
 ```
 use_column_value => true
 tracking_column => "update_time"
-tracking_column_type => numeric
+tracking_column_type => "numeric"
 record_last_run => true
 last_run_metadata_path => "latest_update_time.txt"
 ```
@@ -85,7 +86,7 @@ last_run_metadata_path => "latest_update_time.txt"
 statement => "SELECT * FROM logstash_resource where update_time >= :sql_last_value;"
 ```
 
-`schedule`表示的是调度的信息，执行`statement`并把结果存储到`elasticsearch`的执行实际，这个里面表示的是每秒执行一次。
+`schedule`表示的是调度的信息，执行`statement`并把结果存储到`elasticsearch`的执行时机，这个里面表示的是每秒执行一次。
 
 ```
 schedule => "* * * * * *"
@@ -93,7 +94,7 @@ schedule => "* * * * * *"
 
 ## nested field 同步
 
-比如有一个用户对资源的角色表，需要用户按照对资源的角色进行搜索，这个时候需要使用`nested field`。
+`mysql`是存在一对多的场景的，比如存在一个用户对资源的角色表，每个资源是存在多个用户对此资源有权限的。用户对资源的角色信息如果需要存储到`elasticsearch`之中，就需要使用`nested field`了。
 
 ### 新增表结构
 
@@ -272,4 +273,3 @@ curl -X PUT -H 'Content-Type: application/json' -d '
 [1] https://www.elastic.co/guide/en/logstash/current/plugins-inputs-jdbc.html#plugins-inputs-jdbc-record_last_run
 
 [2] https://www.elastic.co/guide/en/logstash/current/plugins-filters-aggregate.html#plugins-filters-aggregate
-
