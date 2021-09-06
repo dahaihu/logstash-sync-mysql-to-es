@@ -265,8 +265,8 @@ curl -X PUT -H 'Content-Type: application/json' -d '
 ## logstash同步的问题
 
 1. 如果`sql`使用的条件是`>`，假如此时的最大`update_time`是`1630744741`，而后续如果也有`update_time`是`1630744741`的数据插入进来，数据就不会插入到`elasticsearch`里面去；如果`sql`使用的条件是`>=`，那么下次执行的时候，数据记录中`update_time`为`1630744741`会再次同步。(这个`update_time`是一个`s`级的时间戳，要在一定程度上缓解这个问题可以使用`ms`级的时间戳)
-2. nested field数据更新，需要由`logstash_resource_role`表反映到`logstash_resource`里面去，因为需要由`update_time`才会触发对资源的数据以及角色的数据进行更新。
-3. 本文所有代码都在项目[logstash-sync-mysql-to-es](https://github.com/dahaihu/logstash-sync-mysql-to-es)，觉得有用的同学可以给本文点赞呀，还可以`star`下项目。()
+2. nested field数据更新，需要由`logstash_resource_role`表反映到`logstash_resource`里面去，因为需要由`update_time`才会触发对资源的数据以及角色的数据进行更新, ，这个就会增加业务逻辑之间的复杂度了。。
+3. 本文所有代码都在项目[logstash-sync-mysql-to-es](https://github.com/dahaihu/logstash-sync-mysql-to-es)，觉得有用的同学可以给本文点赞呀，还可以`star`下项目。
 
 ### 参考文献
 
